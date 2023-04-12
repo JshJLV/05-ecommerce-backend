@@ -1,6 +1,9 @@
 const { response } = require("express");
 const Users = require("../models/users");
+const jwt = require("jsonwebtoken");
+const bcryptjs = require("bcryptjs");
 
+// obtener usuarios
 const getUsers = async (req, res) => {
   try {
     const users = await Users.find({});
@@ -13,18 +16,39 @@ const getUsers = async (req, res) => {
   }
 };
 
+// crear un nuevo usuario
 const createUser = async (req, res) => {
   try {
     const { firstName, lastName, age, email, password } = req.body;
-    await Users.create({
+
+    const salt = await bcryptjs.genSalt(10);
+    const hashedPassword = await bcryptjs.hash(password, salt);
+
+    const newUser = await Users.create({
       firstName,
       lastName,
       age,
       email,
-      password,
+      password: hashedPassword,
     });
 
-    res.json("user created");
+    const payload = {
+      user: {
+        id: newUser._id,
+      },
+    };
+
+    jwt.sign(
+      payload,
+      process.env.JWT_SECRET,
+      {
+        expiresIn: 360000,
+      },
+      (error, token) => {
+        if (error) throw error;
+        res.json({ token });
+      }
+    );
   } catch (error) {
     res.json({
       msg: error.message,
@@ -32,6 +56,64 @@ const createUser = async (req, res) => {
   }
 };
 
+// verificar si el usuario existe
+const verifyUser = async (req, res) => {
+  try {
+    const verify = await Users.findOne(res.user.id).select("-password");
+    res.json({ verify });
+  } catch (error) {
+    res.status(500).json({
+      msg: "Hubo un error",
+      error,
+    });
+  }
+};
+
+// login
+const loginUser = async (req, res) => {
+  const { email, password } = req.body;
+
+  try {
+    let foundUser = await Users.findOne({ email: email });
+
+    if (!foundUser) {
+      return res.status(400).json({ msg: "el usuario no existe" });
+    }
+
+    const verifyPassword = await bcryptjs.compare(password, foundUser.password);
+
+    if (!verifyPassword) {
+      return await res.status(500).json({ msg: "password incorrecto" });
+    }
+
+    const payload = {
+      user: {
+        id: foundUser._id,
+      },
+    };
+
+    if (email && verifyPassword) {
+      jwt.sign(
+        payload,
+        process.env.JWT_SECRET,
+        {
+          expiresIn: 360000,
+        },
+        (error, token) => {
+          if (error) throw error;
+          res.json({ token });
+        }
+      );
+    }
+  } catch (error) {
+    res.json({
+      msg: "No se puede logear",
+      error: error,
+    });
+  }
+};
+
+// actualizar un usuario
 const updateUser = async (req, res) => {
   const { email } = req.params;
   const { firstName, lastName, age, password } = req.body;
@@ -55,6 +137,7 @@ const updateUser = async (req, res) => {
   }
 };
 
+// eliminar un usuario
 const deleteUser = async (req, res) => {
   const { email } = req.params;
 
@@ -75,4 +158,11 @@ const deleteUser = async (req, res) => {
   }
 };
 
-module.exports = { getUsers, createUser, updateUser, deleteUser };
+module.exports = {
+  getUsers,
+  createUser,
+  updateUser,
+  deleteUser,
+  verifyUser,
+  loginUser,
+};
